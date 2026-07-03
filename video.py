@@ -11,8 +11,8 @@ from PIL import Image, ImageDraw, ImageFont
 from nusc_lab.annotations import filter_annotation_tokens
 from nusc_lab.schema import CAMERA_CHANNELS, raw_category_to_detection
 from nusc_lab.sensors import load_image, load_lidar_points_from_sample, sensor_file_path
-from nusc_lab.transforms import global_to_ego, quaternion_to_rotation_matrix
 from nusc_lab.utils.colors import CATEGORY_COLORS, DEFAULT_BOX_COLOR
+from nusc_lab.visualization.bev import boxes_in_sample_data_frame, box_footprint_xy
 
 
 VIDEO_CAMERA_ORDER = [
@@ -157,7 +157,7 @@ def _bev_pixel_mapper(
     ylim: tuple[float, float],
     margin: int = 18,
 ):
-    """Return a mapper from ego-frame xy coordinates to BEV pixel coordinates."""
+    """Return a mapper from reference-frame xy coordinates to BEV pixels."""
     usable_w = max(1, width - 2 * margin)
     usable_h = max(1, height - 2 * margin)
     xmin, xmax = xlim
@@ -188,39 +188,6 @@ def _lidar_colors(points: np.ndarray, mode: str = "distance") -> np.ndarray:
     colors[:, 1] = (80 + 175 * t).astype(np.uint8)
     colors[:, 2] = (230 - 130 * t).astype(np.uint8)
     return colors
-
-
-def _yaw_from_quaternion(q) -> float:
-    R = quaternion_to_rotation_matrix(q)
-    return float(np.arctan2(R[1, 0], R[0, 0]))
-
-
-def _box_corners_ego(ann: dict, ref_ego_pose: dict) -> np.ndarray:
-    """Return 2D BEV corners for a global annotation box in the reference ego frame."""
-    center_ego = global_to_ego(np.asarray([ann["translation"]], dtype=float), ref_ego_pose)[0, :3]
-    ego_yaw = _yaw_from_quaternion(ref_ego_pose["rotation"])
-    box_yaw = _yaw_from_quaternion(ann["rotation"]) - ego_yaw
-    width, length, _height = ann["size"]
-    local = np.array(
-        [
-            [length / 2, width / 2],
-            [length / 2, -width / 2],
-            [-length / 2, -width / 2],
-            [-length / 2, width / 2],
-            [length / 2, width / 2],
-        ],
-        dtype=float,
-    )
-    c, s = np.cos(box_yaw), np.sin(box_yaw)
-    rot = np.array([[c, -s], [s, c]])
-    return local @ rot.T + center_ego[:2]
-
-
-def _matches_class(ann: dict, filters: set[str]) -> bool:
-    if not filters:
-        return True
-    det_name = raw_category_to_detection(ann["category_name"])
-    return ann["category_name"] in filters or (det_name in filters if det_name else False)
 
 
 def render_lidar_bev_tile(
@@ -263,9 +230,8 @@ def render_lidar_bev_tile(
 
     canvas = Image.fromarray(image, mode="RGB")
     draw = ImageDraw.Draw(canvas)
-    filters = {item.strip() for item in class_filter or [] if item.strip()}
 
-    # Draw range rings and ego marker after points so the orientation stays legible.
+    # Draw range rings and reference-frame origin after points so orientation stays legible.
     for radius in [10, 20, 30, 40, 50]:
         ring = []
         theta = np.linspace(0, 2 * np.pi, 180)
@@ -281,19 +247,14 @@ def render_lidar_bev_tile(
     draw.line((ego[0], ego[1], ego[0], ego[1] - 24), fill=(60, 160, 255), width=2)
 
     if with_boxes and sample.get("anns"):
-        ref_sd = nusc.get("sample_data", sample["data"]["LIDAR_TOP"])
-        ref_ego = nusc.get("ego_pose", ref_sd["ego_pose_token"])
-        for ann_token in sample["anns"]:
-            ann = nusc.get("sample_annotation", ann_token)
-            if not _matches_class(ann, filters):
-                continue
-            corners = _box_corners_ego(ann, ref_ego)
+        for box in boxes_in_sample_data_frame(nusc, sample, ref_channel="LIDAR_TOP", class_filter=class_filter):
+            corners = box_footprint_xy(box)
             pix = map_xy(corners)
-            det_name = raw_category_to_detection(ann["category_name"])
-            color = _rgb255(CATEGORY_COLORS.get(det_name or ann["category_name"], DEFAULT_BOX_COLOR))
+            det_name = raw_category_to_detection(box.name)
+            color = _rgb255(CATEGORY_COLORS.get(det_name or box.name, DEFAULT_BOX_COLOR))
             pts = [tuple(p) for p in pix]
             draw.line(pts, fill=color, width=3)
-            draw.text(pts[0], det_name or ann["category_name"].split(".")[-1], fill=color, font=_font(12))
+            draw.text(pts[0], det_name or box.name.split(".")[-1], fill=color, font=_font(12))
 
     _draw_panel_header(draw, (0, 0, width, height), "3D / LIDAR_TOP BEV + sample_annotation")
     return canvas
