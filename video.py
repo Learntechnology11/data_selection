@@ -155,18 +155,32 @@ def _bev_pixel_mapper(
     height: int,
     xlim: tuple[float, float],
     ylim: tuple[float, float],
-    margin: int = 18,
+    margin: int = 36,
 ):
-    """Return a mapper from reference-frame xy coordinates to BEV pixels."""
+    """Return an equal-scale mapper from reference-frame xy to BEV pixels.
+
+    x points upward in the rendered tile and y-left points left, matching the
+    standalone LiDAR BEV view. A single meters-to-pixels scale is used for both
+    axes so the bottom video panel does not stretch the BEV horizontally.
+    """
     usable_w = max(1, width - 2 * margin)
     usable_h = max(1, height - 2 * margin)
     xmin, xmax = xlim
     ymin, ymax = ylim
+    xspan = xmax - xmin
+    yspan = ymax - ymin
+    if xspan <= 0 or yspan <= 0:
+        raise ValueError(f"Invalid BEV limits: xlim={xlim}, ylim={ylim}")
+    scale = min(usable_w / yspan, usable_h / xspan)
+    x_center = (xmin + xmax) / 2
+    y_center = (ymin + ymax) / 2
+    u_center = width / 2
+    v_center = height / 2
 
     def map_xy(xy: np.ndarray) -> np.ndarray:
         arr = np.asarray(xy, dtype=float)
-        u = margin + (ymax - arr[:, 1]) / (ymax - ymin) * usable_w
-        v = margin + (xmax - arr[:, 0]) / (xmax - xmin) * usable_h
+        u = u_center - (arr[:, 1] - y_center) * scale
+        v = v_center - (arr[:, 0] - x_center) * scale
         return np.column_stack([u, v])
 
     return map_xy

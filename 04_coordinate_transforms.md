@@ -66,3 +66,22 @@ global annotation box
 对应实现是 `nusc.get_sample_data(sample["data"]["LIDAR_TOP"], selected_anntokens=...)`。
 官方 devkit 会返回已经变换到当前 `sample_data` 传感器坐标系下的 boxes，因此可以和
 原始 `LIDAR_TOP` 点云直接叠加。
+
+## Ego Trajectory 坐标系
+
+`ego_pose.translation` 表示某个 `sample_data` 时间戳下，自车在该 log 的 global
+map frame 中的位置。绘制 scene 级 `ego_trajectory` 时，本工程默认使用每个 sample
+的 `LIDAR_TOP` keyframe sample_data：
+
+```text
+sample
+ -> sample["data"]["LIDAR_TOP"]
+ -> sample_data["ego_pose_token"]
+ -> ego_pose["translation"][:2]
+ -> global map xy trajectory
+```
+
+因此 `ego_trajectory.png` 的横纵轴是 global x/y 米制坐标，不是以第一帧为原点的
+ego/local 坐标，也不是 LiDAR 传感器坐标。后续如果叠加官方 map expansion，必须继续
+使用同一 location 的 global map 坐标；如果要画“以当前车为中心”的局部轨迹，需要额外做
+`global -> current ego` 变换。

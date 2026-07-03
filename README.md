@@ -103,7 +103,7 @@ python scripts/visualize_scene_video.py \
 
 效果是：
     上半部分：6 路相机，2 x 3 排列，并叠加 3D box 和类别标签
-    下半部分：黑色 LiDAR BEV，显示点云、距离环、自车位置、3D annotation boxes
+    下半部分：黑色 3D 面板中居中显示纵向 LiDAR BEV，车头朝上，点云和标签框不横向拉伸
     按 scene 的 sample 顺序逐帧写视频，默认 fps=2.0
     兼容 v1.0-mini、v1.0-trainval、v1.0-test
     v1.0-test 没公开标注，所以不会画 annotation boxes
